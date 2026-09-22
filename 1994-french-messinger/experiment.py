@@ -9,7 +9,7 @@ def plasticity_prob(d, rho):
         Paper: y = 1 - d**rho. d = 0 always gives 1 (the agent has the Good Gene).
         Small rho -> almost nobody learns; large rho -> almost everybody does.
     """
-    d = np.asarray(d, dtype=np.float)
+    d = np.asarray(d, dtype=float)
     return 1 - np.power(d, rho)
 
 def plot_plasticity(show=True):
@@ -38,7 +38,7 @@ def plot_plasticity(show=True):
         ax.set_ylabel("Plasticity probability (learn good gene)")
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
-    fig.tight_layout
+    fig.tight_layout()
     if show:
         plt.show()
     return fig
@@ -100,12 +100,46 @@ class World:
         self._seed_world()
 
     def _seed_world(self):
-        return
+        p, rng = self.p, self.rng
+        self.add_food(p.start_piles)        #Initial food piles - assumes that piles landing on the same cell stack
+
+        cells = rng.choice(p.grid_size**2, size=p.start_pop, replace=False)
+        for slot, cell in enumerate(cells):
+            self.spawn(slot, cell // p.grid_size, cell % p.grid_size, 
+                       rng.integers(0, 2, size=p.gene_length, dtype=np.uint8), 
+                       p.start_food)
+        
     def spawn(self, slot, x, y, genome, food):
-        pass
+        self.alive[slot] = True
+        self.x[slot] = x
+        self.y[slot] = y
+        self.genome[slot] = genome
+        self.has_gp[slot] = False
+        self.food[slot] = food
+        self.occ[x, y] = slot
+
     def add_food(self, n_piles):
-        pass
+        g = self.p.grid_size
+        xs = self.rng.integers(0, g, size=n_piles)
+        ys = self.rng.integers(0, g, size=n_piles)
+        for x, y in zip(xs, ys):
+            self.food_grid[x, y] += self.p.pile_depth
+
+
     def n_alive(self):
         return int(self.alive.sum())
     def normalized_hamming(self, slot):
         return float(np.mean(self.genome[slot] != self.good_gene))
+
+
+if __name__ == "__main__":
+    plot_plasticity()
+
+    p = Params()
+    w = World(p)
+    print(f"Initial number of alive agents: {w.n_alive()} (expected {p.start_pop})")
+    print(f"Occupied cells: {int((w.occ >=0).sum())}")
+    print(f"Total food on grid: {w.food_grid.sum()} (expected {p.start_piles*p.pile_depth})")
+    
+    d = [w.normalized_hamming(i) for i in range(p.start_pop)]
+    print(f"Mean normalized Hamming d: round(np.mean(d), 3)   (expectAed -0.5 for random genomes)")
