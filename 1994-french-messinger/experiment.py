@@ -54,9 +54,9 @@ class Params:
     gene_length: int = 10  # Length of each agent's gene
     start_pop: int = 100
     start_food: int = 100
-    start_piles: int = 30
+    start_piles: int = 100      #calibrated (paper was 30)
     piles_per_step: int = 4     #NumberFoodPilesTurn
-    pile_depth:int = 20         #FoodPileDepth
+    pile_depth:int = 1100       #FoodPileDepth - calibrated, was 20 in the paper
     mouthful:int = 100          #max food eaten per step
 
     # taxes
@@ -78,6 +78,13 @@ class Params:
     #implementation
     max_agents:int = 5000
     seed:int = 42
+
+    # Calibration:
+    # the papers food income  (piles_per_step * pile_depth = 80/step)
+    # can't sustain a population of few hundred paying 5-20 tax pert step - they go extinct
+    # raising pile depth settles into a stable population that matches the figures of the paper
+    # start piles was raised to 100 because with 30 an unlucky run can starve the population before
+    # they have the chance to catch up 
 
 class World:
     def __init__(self, p: Params):
@@ -147,7 +154,139 @@ class World:
         return int(self.alive.sum())
     def normalized_hamming(self, slot):
         return float(np.mean(self.genome[slot] != self.good_gene))
+    def n_good_gene(self):
+        """Count agents whose genome exactly matches the Good Gene (d = 0)."""
+        alive_idx = np.flatnonzero(self.alive)
+        return int(np.sum(np.all(self.genome[alive_idx] == self.good_gene, axis=1)))
+    def n_good_phene(self):
+        return int(self.has_gp[self.alive].sum())
 
+
+    #4 neighbor offset 
+    _DX = (1, -1, 0, 0)
+    _DY = (0, 0, 1, -1)
+
+    def _neighbors(self, x, y):
+        g = self.p.grid_size
+        return [((x+dx)%g, (y+dy)%g) for dx, dy in zip(self._DX, self._DY)]
+
+    def _find_free_slot(self):
+        free = np.flatnonzero(~self.alive)
+        return int(free[0]) if free.size else None
+
+    def _mutate(self, genome):
+        flips = self.rng.random(genome.shape[0]) < self.p.mutation_rate
+        child = genome.copy()
+        child[flips] ^= 1
+        return child
+
+    def _kill(self, slot):
+        self.occ[self.x[slot], self.y[slot]] = -1
+        self.alive[slot] = False
+
+    def _reproduce_asexual(self, slot):
+        p = self.p
+        tax = p.repo_tax
+        if self.has_gp[slot] and p.gp_type == 3: 
+            tax /= p.gp_benefit     # reduce amount taxed for reproduction if GP is of type 3
+        if self.food[slot] - tax < 0:
+            return                  # can't afford to reproduce
+
+        #Place child on a free cell in parent's adjacency, if not free it fails - ASSUMPTION
+        x, y = self.x[slot], self.y[slot]
+        empty= [(cx, cy) for cx, cy in self._neighbors(x, y) if self.occ[cx, cy] == -1]
+
+        if not empty: 
+            return 
+        free_slot = self._find_free_slot()
+        if free_slot is None:
+            return  # max agents reached
+
+        cx, cy = empty[self.rng.integers(0, len(empty))]
+        child_genome = self._mutate(self.genome[slot])
+        self.food[slot] -= tax
+        self.spawn(free_slot, cx, cy, child_genome, tax)    #child inherits the taxed food
+
+    def _move(self, slot):
+        """Move toward the neighbour cell with the most food.
+ 
+        ASSUMPTION: if the best cell is occupied, the agent stays put and
+        pays no movement tax.
+        """
+        p = self.p
+        x, y = self.x[slot], self.y[slot]
+        neigh = self._neighbors(x, y)
+        levels = np.array([self.food_grid[cx, cy] for cx, cy in neigh])
+        best = levels.max()
+        if best == levels.min():
+            direction = self.last_dir[slot]  # all equal: keep going the same way
+        else:
+            candidates = np.flatnonzero(levels == best)
+            direction = candidates[0] if self.last_dir[slot] not in candidates \
+                else self.last_dir[slot]
+        nx, ny = neigh[direction]
+        if self.occ[nx, ny] != -1:
+            return  # blocked: stay, no tax
+        tax = p.move_tax
+        if self.has_gp[slot] and p.gp_type == 1:
+            tax /= p.gp_benefit
+        self.occ[x, y] = -1
+        self.x[slot], self.y[slot] = nx, ny
+        self.occ[nx, ny] = slot
+        self.last_dir[slot] = direction
+        self.food[slot] -= tax
+        if self.food[slot] <= 0:
+            self._kill(slot)
+
+    def step(self):
+        p = self.p
+        self.add_food(p.piles_per_step)
+ 
+        order = self.rng.permutation(np.flatnonzero(self.alive))
+        for slot in order:
+            if not self.alive[slot]:
+                continue
+ 
+            # Metabolize
+            tax = p.meta_tax
+            if self.has_gp[slot] and p.gp_type == 2:
+                tax /= p.gp_benefit
+            self.food[slot] -= tax
+            if self.food[slot] <= 0:
+                self._kill(slot)
+                continue
+ 
+            # Eat
+            x, y = self.x[slot], self.y[slot]
+            eaten = min(self.food_grid[x, y], p.mouthful)
+            self.food[slot] += eaten
+            self.food_grid[x, y] -= eaten
+ 
+            # Reproduce (asexual for now)
+            if self.food[slot] > p.repo_threshold:
+                self._reproduce_asexual(slot)
+ 
+            # Move
+            if self.alive[slot]:
+                self._move(slot)
+ 
+        self.t += 1
+
+def run_simulation(p: Params, n_steps: int, log_every: int = 1):
+    """Run the world for n_steps, logging population  GP and GG counts"""
+    w = World(p)
+    ts, pop, gp, gg = [], [], [], []
+    for step in range(n_steps):
+        w.step()
+        if step % log_every == 0:
+            ts.append(w.t)
+            pop.append(w.n_alive())
+            gp.append(w.n_good_phene())
+            gg.append(w.n_good_gene())
+        if w.n_alive() == 0:
+            break
+    return {"t": np.array(ts), "pop": np.array(pop),
+            "gp": np.array(gp), "gg": np.array(gg)}
 
 if __name__ == "__main__":
     plot_plasticity()
@@ -176,3 +315,14 @@ if __name__ == "__main__":
     expected = plasticity_prob(0.2, 0.1)
     print(f"learning rate at d=0.2, rho=0.1: {got_gp/trials:.3f} "
           f"(expected ~{expected:.3f})")
+
+
+    # Step 4 check: run the (uncalibrated) control for a bit and see
+    # what the population does. Paper values give ~80 food/step income,
+    # which is not going to sustain ~100+ agents paying tax every step --
+    # expect a crash here. This sets up the calibration in Step 5.
+    p4 = Params(learning=False, seed=2)
+    log = run_simulation(p4, n_steps=201,log_every=20)
+    print("\nuncalibrated control run (pop every 20 steps):")
+    for t, pop in zip(log["t"], log["pop"]):
+        print(f"  t={t:4d}  pop={pop}")
