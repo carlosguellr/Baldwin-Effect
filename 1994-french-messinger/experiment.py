@@ -1,3 +1,7 @@
+"""
+Recreation of French and Messinger's 1994 Paper "Genes, Phenes and the Baldwin Effect"
+"""
+
 from dataclasses import dataclass
 
 import numpy as np 
@@ -59,7 +63,7 @@ class Params:
     meta_tax: int = 5
     move_tax: int = 15
     repo_tax: int = 150
-    repo_threshold: int = 300
+    repo_threshold: int = 200
 
     #genetics
     mutation_rate: float = 0.005    # Paper says = 50?? what dopes that mean. PLACEHOLDER PER BIT
@@ -117,6 +121,19 @@ class World:
         self.has_gp[slot] = False
         self.food[slot] = food
         self.occ[x, y] = slot
+        self.has_gp[slot] = self.resolve_good_phene(slot)
+
+    def resolve_good_phene(self, slot):
+        """
+            Decide whether agent at slot ends up with the GP
+            d == 0 --> agent has GG, always succeeds (1-0*rho == 1)
+            If p.learning is false no learning happens at all, only agents with GG get GP
+        """
+        d = self.normalized_hamming(slot)
+        if not self.p.learning:
+            return d == 0.0
+        p_learn = plasticity_prob(d, self.p.plasticity)
+        return bool(self.rng.random() < p_learn)
 
     def add_food(self, n_piles):
         g = self.p.grid_size
@@ -142,4 +159,20 @@ if __name__ == "__main__":
     print(f"Total food on grid: {w.food_grid.sum()} (expected {p.start_piles*p.pile_depth})")
     
     d = [w.normalized_hamming(i) for i in range(p.start_pop)]
-    print(f"Mean normalized Hamming d: round(np.mean(d), 3)   (expectAed -0.5 for random genomes)")
+    print(f"Mean normalized Hamming d: {round(np.mean(d), 3)}   (expected 0.5 for random genomes)")
+
+
+    #does the learning rate match plasticity_prob? --> build many agents at fixed distance and see
+    # what fraction ends up with GP
+    p3 = Params(gene_length=10, plasticity=0.1, learning=True, seed=1,
+                max_agents=20000)
+    w3 = World(p3)
+    trials = 20000
+    genome_d02 = np.array([0, 0, 1, 1, 1, 1, 1, 1, 1, 1], dtype=np.uint8)  # d=0.2
+    got_gp = 0
+    for slot in range(trials):
+        w3.spawn(slot, 0, 0, genome_d02, p3.start_food)  # same cell is fine here
+        got_gp += w3.has_gp[slot]
+    expected = plasticity_prob(0.2, 0.1)
+    print(f"learning rate at d=0.2, rho=0.1: {got_gp/trials:.3f} "
+          f"(expected ~{expected:.3f})")
