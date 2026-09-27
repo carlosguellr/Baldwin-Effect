@@ -2,7 +2,7 @@
 Recreation of French and Messinger's 1994 Paper "Genes, Phenes and the Baldwin Effect"
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np 
 import matplotlib.pyplot as plt
@@ -52,7 +52,7 @@ def plot_plasticity(show=True):
 class Params:
     grid_size: int = 100    #100x100 grid with at most 1 agent per cell
 
-    gene_length: int = 10  # Length of each agent's gene
+    gene_length: int = 12  # Length of each agent's gene
     start_pop: int = 100
     start_food: int = 100
     start_piles: int = 100      #calibrated (paper was 30)
@@ -67,7 +67,8 @@ class Params:
     repo_threshold: int = 200
 
     #genetics
-    mutation_rate: float = 0.005    # Paper says = 50?? what dopes that mean. PLACEHOLDER PER BIT
+    mutation_rate: float = 0.001    # Paper says = 50?? what dopes that mean. PLACEHOLDER PER BIT
+    # lowered to 0.001 to prevent hitting GG by pure chance mutation
 
     #learning 
     learning:bool = True
@@ -161,6 +162,12 @@ class World:
         return int(np.sum(np.all(self.genome[alive_idx] == self.good_gene, axis=1)))
     def n_good_phene(self):
         return int(self.has_gp[self.alive].sum())
+    def mean_hamming(self):
+        """Mean normalized Hamming distance to the Good Gene, across all agents."""
+        alive_idx = np.flatnonzero(self.alive)
+        if alive_idx.size == 0:
+            return float("nan")
+        return float(np.mean(self.genome[alive_idx] != self.good_gene))
 
 
     #4 neighbor offset 
@@ -274,10 +281,23 @@ class World:
  
         self.t += 1
 
+def plot_run(log, title, ax=None):
+    """Plot population / GP / GG counts over time"""
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(log["t"], log["pop"], label="Population")
+    ax.plot(log["t"], log["gp"], label="GP population")
+    ax.plot(log["t"], log["gg"], label="GG population")
+    ax.set_xlabel("Generations (timesteps)")
+    ax.set_ylabel("Population")
+    ax.set_title(title)
+    ax.legend()
+    return ax
+
 def run_simulation(p: Params, n_steps: int, log_every: int = 1):
     """Run the world for n_steps, logging population  GP and GG counts"""
     w = World(p)
-    ts, pop, gp, gg = [], [], [], []
+    ts, pop, gp, gg, hamming = [], [], [], [], []
     for step in range(n_steps):
         w.step()
         if step % log_every == 0:
@@ -285,23 +305,98 @@ def run_simulation(p: Params, n_steps: int, log_every: int = 1):
             pop.append(w.n_alive())
             gp.append(w.n_good_phene())
             gg.append(w.n_good_gene())
+            hamming.append(w.mean_hamming())
         if w.n_alive() == 0:
             break
     return {"t": np.array(ts), "pop": np.array(pop),
-            "gp": np.array(gp), "gg": np.array(gg)}
+            "gp": np.array(gp), "gg": np.array(gg),
+            "hamming": np.array(hamming)}
+
+def run_multi_seed(base_params: Params, seeds, n_steps: int, log_every: int = 100):
+    """Run the same config across several seeds; return per-timestep mean/std
+    of population, GG% (percent of population with the Good Gene), and mean
+    Hamming distance to the Good Gene.
+ 
+    GG% (not raw GG count) is what gets averaged across seeds, since
+    population size varies a lot between runs (boom-bust dynamics) and
+    raw counts from different-sized populations aren't comparable.
+    If a run goes extinct early, its last value is held flat for the
+    remaining timesteps so all seeds can still be stacked together.
+    """
+    t_ref = None
+    pop_runs, gg_pct_runs, hamming_runs = [], [], []
+    for seed in seeds:
+        p = replace(base_params, seed=seed)
+        log = run_simulation(p, n_steps=n_steps, log_every=log_every)
+        if t_ref is None:
+            t_ref = log["t"]
+        L = len(t_ref)
+        n = len(log["pop"])  # may be < L if this run went extinct early
+ 
+        pop = np.zeros(L, dtype=float)
+        pop[:n] = log["pop"]
+ 
+        gg_pct = np.zeros(L, dtype=float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            gg_pct[:n] = np.where(log["pop"][:n] > 0,
+                                   100 * log["gg"][:n] / np.maximum(log["pop"][:n], 1),
+                                   0.0)
+ 
+        hamming = np.full(L, np.nan)
+        hamming[:n] = log["hamming"]
+ 
+        if n < L and n > 0:
+            pop[n:] = pop[n - 1]
+            gg_pct[n:] = gg_pct[n - 1]
+            hamming[n:] = hamming[n - 1]
+ 
+        pop_runs.append(pop)
+        gg_pct_runs.append(gg_pct)
+        hamming_runs.append(hamming)
+ 
+    pop_runs = np.array(pop_runs)
+    gg_pct_runs = np.array(gg_pct_runs)
+    hamming_runs = np.array(hamming_runs)
+    return {
+        "t": t_ref,
+        "pop_mean": pop_runs.mean(axis=0), "pop_std": pop_runs.std(axis=0),
+        "gg_pct_mean": gg_pct_runs.mean(axis=0), "gg_pct_std": gg_pct_runs.std(axis=0),
+        "hamming_mean": hamming_runs.mean(axis=0), "hamming_std": hamming_runs.std(axis=0),
+        "n_seeds": len(seeds),
+    }
+ 
+ 
+def plot_multi_seed_comparison(res_learn, res_ctrl, title):
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4.5))
+ 
+    for res, label in [(res_learn, "Learning ON"), (res_ctrl, "Learning OFF (control)")]:
+        ax1.plot(res["t"], res["pop_mean"], label=label)
+    ax1.set_xlabel("Generations (timesteps)")
+    ax1.set_ylabel("Population")
+    ax1.set_title("Population")
+    ax1.legend()
+ 
+    for res, label in [(res_learn, "Learning ON"), (res_ctrl, "Learning OFF (control)")]:
+        ax2.plot(res["t"], res["gg_pct_mean"], label=label)
+    ax2.set_xlabel("Generations (timesteps)")
+    ax2.set_ylabel("% of population with Good Gene")
+    ax2.set_title("Good Gene %")
+    ax2.legend()
+ 
+    for res, label in [(res_learn, "Learning ON"), (res_ctrl, "Learning OFF (control)")]:
+        ax3.plot(res["t"], res["hamming_mean"], label=label)
+    ax3.set_xlabel("Generations (timesteps)")
+    ax3.set_ylabel("Mean normalized Hamming distance to GG")
+    ax3.set_title("Mean distance to Good Gene")
+    ax3.legend()
+ 
+    fig.suptitle(title)
+    fig.tight_layout()
+    return fig
+ 
 
 if __name__ == "__main__":
     plot_plasticity()
-
-    p = Params()
-    w = World(p)
-    print(f"Initial number of alive agents: {w.n_alive()} (expected {p.start_pop})")
-    print(f"Occupied cells: {int((w.occ >=0).sum())}")
-    print(f"Total food on grid: {w.food_grid.sum()} (expected {p.start_piles*p.pile_depth})")
-    
-    d = [w.normalized_hamming(i) for i in range(p.start_pop)]
-    print(f"Mean normalized Hamming d: {round(np.mean(d), 3)}   (expected 0.5 for random genomes)")
-
 
     #does the learning rate match plasticity_prob? --> build many agents at fixed distance and see
     # what fraction ends up with GP
@@ -328,3 +423,64 @@ if __name__ == "__main__":
     print("\nuncalibrated control run (pop every 20 steps):")
     for t, pop in zip(log["t"], log["pop"]):
         print(f"  t={t:4d}  pop={pop}")
+
+
+
+    # --------------------------------------------------------------------
+    # Simulation 1 (paper's Figures 3 vs 4): does GG rise with learning
+    # and stay flat without it? Same seed, same everything else.
+    # --------------------------------------------------------------------
+    n_steps = 3000
+    p_learn = Params(learning=True, seed=2)
+    p_ctrl = Params(learning=False, seed=2)
+ 
+    log_learn = run_simulation(p_learn, n_steps=n_steps, log_every=10)
+    log_ctrl = run_simulation(p_ctrl, n_steps=n_steps, log_every=10)
+ 
+    print("\nGG% at end of run:")
+    print(f"  learning=True : {log_learn['gg'][-1]} / {log_learn['pop'][-1]} "
+          f"= {100*log_learn['gg'][-1]/max(1,log_learn['pop'][-1]):.1f}%")
+    print(f"  learning=False: {log_ctrl['gg'][-1]} / {log_ctrl['pop'][-1]} "
+          f"= {100*log_ctrl['gg'][-1]/max(1,log_ctrl['pop'][-1]):.1f}%")
+ 
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    plot_run(log_learn, "Fig. 3 style: learning ON (rho=0.1)", ax=ax1)
+    plot_run(log_ctrl, "Fig. 4 style: learning OFF (control)", ax=ax2)
+    fig.tight_layout()
+    fig.savefig("sim1_learning_vs_control.png", dpi=120)
+    print("saved sim1_learning_vs_control.png")
+
+
+    # --------------------------------------------------------------------
+    # Multi-seed averaged comparison. This is the real Simulation-1 result:
+    # individual runs are noisy (see the drift-confound note in Params),
+    # so we average GG% across many seeds to see the actual expected
+    # difference between learning and no-learning.
+    #
+    # SLOW: each 5000-step run takes ~30-40s here, so N_SEEDS seeds x 2
+    # conditions can take a while (15 seeds -> roughly 15-20 minutes).
+    # Set RUN_MULTISEED = False to skip this and only run the quick
+    # checks above.
+    # --------------------------------------------------------------------
+    RUN_MULTISEED = True
+    if RUN_MULTISEED:
+        N_SEEDS = 15
+        N_STEPS = 5000
+        seeds = range(100, 100 + N_SEEDS)  # separate range from the seeds used above
+ 
+        print(f"\nrunning multi-seed comparison ({N_SEEDS} seeds x 2 conditions, "
+              f"{N_STEPS} steps each)...")
+        res_learn = run_multi_seed(Params(learning=True), seeds, N_STEPS, log_every=100)
+        res_ctrl = run_multi_seed(Params(learning=False), seeds, N_STEPS, log_every=100)
+ 
+        print(f"final GG%% (mean +/- std across {N_SEEDS} seeds):")
+        print(f"  learning=True : {res_learn['gg_pct_mean'][-1]:.1f}% "
+              f"+/- {res_learn['gg_pct_std'][-1]:.1f}%")
+        print(f"  learning=False: {res_ctrl['gg_pct_mean'][-1]:.1f}% "
+              f"+/- {res_ctrl['gg_pct_std'][-1]:.1f}%")
+ 
+        fig2 = plot_multi_seed_comparison(
+            res_learn, res_ctrl,
+            title=f"Simulation 1: learning vs control (mean +/- std, {N_SEEDS} seeds)")
+        fig2.savefig("sim1_multiseed_comparison.png", dpi=120)
+        print("saved sim1_multiseed_comparison.png")
