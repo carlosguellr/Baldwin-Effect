@@ -367,13 +367,22 @@ def run_multi_seed(base_params: Params, seeds, n_steps: int, log_every: int = 10
  
  
 def plot_multi_seed_comparison(res_learn, res_ctrl, title):
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4.5))
+    """Mean-only lines (no std shading) across four panels: population,
+    Good Phene %, Good Gene %, and mean Hamming distance to the Good Gene."""
+    fig, (ax0, ax1, ax2, ax3) = plt.subplots(1, 4, figsize=(22, 4.5))
  
     for res, label in [(res_learn, "Learning ON"), (res_ctrl, "Learning OFF (control)")]:
-        ax1.plot(res["t"], res["pop_mean"], label=label)
+        ax0.plot(res["t"], res["pop_mean"], label=label)
+    ax0.set_xlabel("Generations (timesteps)")
+    ax0.set_ylabel("Population")
+    ax0.set_title("Population")
+    ax0.legend()
+ 
+    for res, label in [(res_learn, "Learning ON"), (res_ctrl, "Learning OFF (control)")]:
+        ax1.plot(res["t"], res["gp_pct_mean"], label=label)
     ax1.set_xlabel("Generations (timesteps)")
-    ax1.set_ylabel("Population")
-    ax1.set_title("Population")
+    ax1.set_ylabel("% of population with Good Phene")
+    ax1.set_title("Good Phene %")
     ax1.legend()
  
     for res, label in [(res_learn, "Learning ON"), (res_ctrl, "Learning OFF (control)")]:
