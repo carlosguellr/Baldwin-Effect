@@ -12,6 +12,7 @@ def plasticity_prob(d, rho):
         Probability of plasticity as a function of distance d and parameter rho.
         Paper: y = 1 - d**rho. d = 0 always gives 1 (the agent has the Good Gene).
         Small rho -> almost nobody learns; large rho -> almost everybody does.
+        d -> hamming distance from the good phene 
     """
     d = np.asarray(d, dtype=float)
     return 1 - np.power(d, rho)
@@ -60,7 +61,7 @@ class Params:
     mouthful:int = 100          #max food eaten per step
 
     # taxes
-    meta_tax: int = 5
+    meta_tax: int = 5           #tax for existing (even when not moving)
     move_tax: int = 15
     repo_tax: int = 150
     repo_threshold: int = 200
@@ -71,7 +72,7 @@ class Params:
     #learning 
     learning:bool = True
     plasticity:float = 0.1         #rho
-    gp_benefit:float = 2.0         #benefit of learning the good gene - tax is divided by this
+    gp_benefit:float = 2.0         #benefit of learning the good phene - tax is divided by this
     gp_type:int =1                 # 1 = move, 2 = metabolism, 3 = reproduce
     sexual:bool = False
 
@@ -171,13 +172,14 @@ class World:
         return [((x+dx)%g, (y+dy)%g) for dx, dy in zip(self._DX, self._DY)]
 
     def _find_free_slot(self):
-        free = np.flatnonzero(~self.alive)
+        free = np.flatnonzero(~self.alive)  #~ flips the aray (True os where a slot is free) - flatnonzero returns indices where that condition is true
         return int(free[0]) if free.size else None
 
     def _mutate(self, genome):
+        #flips decides which genes mutate (random generates a random num for each gene)
         flips = self.rng.random(genome.shape[0]) < self.p.mutation_rate
         child = genome.copy()
-        child[flips] ^= 1
+        child[flips] ^= 1 #XOR to flip 
         return child
 
     def _kill(self, slot):
