@@ -37,14 +37,6 @@ def next_generation(population, fitness_values, rng):
     crossover = rng.integers(1, N_GENES, size=POP_SIZE)[:, None]
     return np.where(np.arange(N_GENES) < crossover, parent_1, parent_2)  # Crossover to create new generation
 
-
-# history = np.array(history)
-# print(f"{'Generation':>10} {'Correct':>8} {'Incorrect':>10} {'Plastic':>8} {'Fitness':>8}")
-# for generation in range(0, GENS, 5):
-#     correct, incorrect, plastic, mean_fitness = history[generation]
-#     print(f"{generation:>10} {correct:>8.3f} {incorrect:>10.3f} {plastic:>8.3f} {mean_fitness:>8.2f}")
-
-
 def run_simulation(seed, learning = True):
     """Run a full 51 generation simulation and return its history array"""
     local_rng = np.random.default_rng(seed)
@@ -69,16 +61,6 @@ std_hist  = results.std(axis=0)           # (GENS, 4)
 results_no_learning = run_experiment(N_RUNS, learning=False)
 
 generations = np.arange(GENS)
-
-# # Plot 1: mean fitness 
-# fig, ax = plt.subplots(figsize=(7,4.5))
-# ax.plot(generations, mean_hist[:,3], color="C0", label="Mean fitness (this run set)")
-
-# ax.set_xlabel("Generation")
-# ax.set_ylabel("Mean population fitness")
-# ax.set_title(f"Fitness convergence ({N_RUNS} runs)")
-# ax.legend()
-# fig.tight_layout()
 
 
 #Plot 2: mean fitness learning vs no learning
