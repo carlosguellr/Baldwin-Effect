@@ -314,17 +314,17 @@ def run_simulation(p: Params, n_steps: int, log_every: int = 1):
 
 def run_multi_seed(base_params: Params, seeds, n_steps: int, log_every: int = 100):
     """Run the same config across several seeds; return per-timestep mean/std
-    of population, GG% (percent of population with the Good Gene), and mean
-    Hamming distance to the Good Gene.
- 
-    GG% (not raw GG count) is what gets averaged across seeds, since
+    of population, GP% and GG% (percent of population with the Good Phene /
+    Good Gene), and mean Hamming distance to the Good Gene.
+
+    GP%/GG% (not raw counts) are what get averaged across seeds, since
     population size varies a lot between runs (boom-bust dynamics) and
     raw counts from different-sized populations aren't comparable.
     If a run goes extinct early, its last value is held flat for the
     remaining timesteps so all seeds can still be stacked together.
     """
     t_ref = None
-    pop_runs, gg_pct_runs, hamming_runs = [], [], []
+    pop_runs, gp_pct_runs, gg_pct_runs, hamming_runs = [], [], [], []
     for seed in seeds:
         p = replace(base_params, seed=seed)
         log = run_simulation(p, n_steps=n_steps, log_every=log_every)
@@ -332,34 +332,44 @@ def run_multi_seed(base_params: Params, seeds, n_steps: int, log_every: int = 10
             t_ref = log["t"]
         L = len(t_ref)
         n = len(log["pop"])  # may be < L if this run went extinct early
- 
+
         pop = np.zeros(L, dtype=float)
         pop[:n] = log["pop"]
- 
+
+        gp_pct = np.zeros(L, dtype=float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            gp_pct[:n] = np.where(log["pop"][:n] > 0,
+                                   100 * log["gp"][:n] / np.maximum(log["pop"][:n], 1),
+                                   0.0)
+
         gg_pct = np.zeros(L, dtype=float)
         with np.errstate(divide="ignore", invalid="ignore"):
             gg_pct[:n] = np.where(log["pop"][:n] > 0,
                                    100 * log["gg"][:n] / np.maximum(log["pop"][:n], 1),
                                    0.0)
- 
+
         hamming = np.full(L, np.nan)
         hamming[:n] = log["hamming"]
- 
+
         if n < L and n > 0:
             pop[n:] = pop[n - 1]
+            gp_pct[n:] = gp_pct[n - 1]
             gg_pct[n:] = gg_pct[n - 1]
             hamming[n:] = hamming[n - 1]
- 
+
         pop_runs.append(pop)
+        gp_pct_runs.append(gp_pct)
         gg_pct_runs.append(gg_pct)
         hamming_runs.append(hamming)
- 
+
     pop_runs = np.array(pop_runs)
+    gp_pct_runs = np.array(gp_pct_runs)
     gg_pct_runs = np.array(gg_pct_runs)
     hamming_runs = np.array(hamming_runs)
     return {
         "t": t_ref,
         "pop_mean": pop_runs.mean(axis=0), "pop_std": pop_runs.std(axis=0),
+        "gp_pct_mean": gp_pct_runs.mean(axis=0), "gp_pct_std": gp_pct_runs.std(axis=0),
         "gg_pct_mean": gg_pct_runs.mean(axis=0), "gg_pct_std": gg_pct_runs.std(axis=0),
         "hamming_mean": hamming_runs.mean(axis=0), "hamming_std": hamming_runs.std(axis=0),
         "n_seeds": len(seeds),
@@ -439,7 +449,7 @@ if __name__ == "__main__":
     # Simulation 1 (paper's Figures 3 vs 4): does GG rise with learning
     # and stay flat without it? Same seed, same everything else.
     # --------------------------------------------------------------------
-    n_steps = 3000
+    n_steps = 10000
     p_learn = Params(learning=True, seed=2)
     p_ctrl = Params(learning=False, seed=2)
  
@@ -474,7 +484,7 @@ if __name__ == "__main__":
     RUN_MULTISEED = True
     if RUN_MULTISEED:
         N_SEEDS = 15
-        N_STEPS = 5000
+        N_STEPS = 10000
         seeds = range(100, 100 + N_SEEDS)  # separate range from the seeds used above
  
         print(f"\nrunning multi-seed comparison ({N_SEEDS} seeds x 2 conditions, "
