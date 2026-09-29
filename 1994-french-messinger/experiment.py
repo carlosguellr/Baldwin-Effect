@@ -449,7 +449,7 @@ if __name__ == "__main__":
     # Simulation 1 (paper's Figures 3 vs 4): does GG rise with learning
     # and stay flat without it? Same seed, same everything else.
     # --------------------------------------------------------------------
-    n_steps = 10000
+    n_steps = 3000
     p_learn = Params(learning=True, seed=2)
     p_ctrl = Params(learning=False, seed=2)
  
@@ -484,7 +484,7 @@ if __name__ == "__main__":
     RUN_MULTISEED = True
     if RUN_MULTISEED:
         N_SEEDS = 15
-        N_STEPS = 10000
+        N_STEPS = 15000
         seeds = range(100, 100 + N_SEEDS)  # separate range from the seeds used above
  
         print(f"\nrunning multi-seed comparison ({N_SEEDS} seeds x 2 conditions, "

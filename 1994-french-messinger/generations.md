@@ -1,0 +1,3 @@
+Reproduction is continuous and asynchronous. Any agent can reproduce the moment it crosses repo_threshold, independent of what every other agent is doing. There's no synchronized "everyone reproduces now" moment.
+Generations overlap. A parent doesn't die when it reproduces — it keeps living, eating, and potentially reproducing again, right alongside its own children and grandchildren. There's no clean generational boundary to point to at all.
+Lifespans vary wildly. Some agents starve within a handful of steps; others (especially the eventual Good Gene carriers) can survive and reproduce repeatedly for a long stretch. So "one generation" doesn't correspond to a fixed number of timesteps even on average, in any stable sense — it drifts as ecological conditions change.
