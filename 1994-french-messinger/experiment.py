@@ -74,7 +74,7 @@ class Params:
     learning:bool = True
     plasticity:float = 0.1         #rho
     gp_benefit:float = 2.0         #benefit of learning the good phene - tax is divided by this
-    gp_type:int =1                 # 1 = move, 2 = metabolism, 3 = reproduce
+    gp_type:int = 3                 # 1 = move, 2 = metabolism, 3 = reproduce
     sexual:bool = False
 
     #implementation
