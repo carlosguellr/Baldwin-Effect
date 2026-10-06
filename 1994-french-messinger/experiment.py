@@ -74,7 +74,7 @@ class Params:
     learning:bool = True
     plasticity:float = 0.1         #rho
     gp_benefit:float = 2.0         #benefit of learning the good phene - tax is divided by this
-    gp_type:int = 2                # 1 = move, 2 = metabolism, 3 = reproduce
+    gp_type:int = 3                 # 1 = move, 2 = metabolism, 3 = reproduce
     sexual:bool = False
     sexual_mutation_rate:float = 0.001
 
@@ -533,7 +533,7 @@ if __name__ == "__main__":
     RUN_MULTISEED = True
     if RUN_MULTISEED:
         N_SEEDS = 15
-        N_STEPS = 15000
+        N_STEPS = 10000
         seeds = range(100, 100 + N_SEEDS)  # separate range from the seeds used above
  
         print(f"\nrunning multi-seed comparison ({N_SEEDS} seeds x 2 conditions, "
