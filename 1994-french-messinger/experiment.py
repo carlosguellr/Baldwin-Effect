@@ -533,7 +533,7 @@ if __name__ == "__main__":
     RUN_MULTISEED = True
     if RUN_MULTISEED:
         N_SEEDS = 15
-        N_STEPS = 10000
+        N_STEPS = 15000
         seeds = range(100, 100 + N_SEEDS)  # separate range from the seeds used above
  
         print(f"\nrunning multi-seed comparison ({N_SEEDS} seeds x 2 conditions, "
