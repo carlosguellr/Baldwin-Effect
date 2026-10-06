@@ -74,8 +74,9 @@ class Params:
     learning:bool = True
     plasticity:float = 0.1         #rho
     gp_benefit:float = 2.0         #benefit of learning the good phene - tax is divided by this
-    gp_type:int = 3                 # 1 = move, 2 = metabolism, 3 = reproduce
-    sexual:bool = False
+    gp_type:int = 1                 # 1 = move, 2 = metabolism, 3 = reproduce
+    sexual:bool = True
+    sexual_mutation_rate:float = 0.001
 
     #implementation
     max_agents:int = 5000
@@ -182,9 +183,13 @@ class World:
         free = np.flatnonzero(~self.alive)  #~ flips the aray (True os where a slot is free) - flatnonzero returns indices where that condition is true
         return int(free[0]) if free.size else None
 
-    def _mutate(self, genome):
+    def _mutate(self, genome, asexual):
+        if asexual:
+            mutation_rate = self.p.mutation_rate
+        else:
+            mutation_rate = self.p.sexual_mutation_rate
         #flips decides which genes mutate (random generates a random num for each gene)
-        flips = self.rng.random(genome.shape[0]) < self.p.mutation_rate
+        flips = self.rng.random(genome.shape[0]) < mutation_rate
         child = genome.copy()
         child[flips] ^= 1 #XOR to flip 
         return child
@@ -212,7 +217,48 @@ class World:
             return  # max agents reached
 
         cx, cy = empty[self.rng.integers(0, len(empty))]
-        child_genome = self._mutate(self.genome[slot])
+        child_genome = self._mutate(self.genome[slot], asexual=True)
+        self.food[slot] -= tax
+        self.spawn(free_slot, cx, cy, child_genome, tax)    #child inherits the taxed food
+
+    def _crossover(self, genome1, genome2):
+        """Single-point crossover between two genomes."""
+        L = genome1.shape[0]
+        point = self.rng.integers(1, L)  # crossover point
+        child = np.empty(L, dtype=np.uint8)
+        child[:point] = genome1[:point]
+        child[point:] = genome2[point:]
+        return child
+
+    def _reproduce_sexual(self, slot):
+        p = self.p
+        tax = p.repo_tax
+        if self.has_gp[slot] and p.gp_type == 3: 
+            tax /= p.gp_benefit   
+        if self.food[slot] - tax < 0:
+            return                  # can't afford to reproduce
+
+        #Place child on a free cell in parent's adjacency, if not free it fails
+        x, y = self.x[slot], self.y[slot]
+        empty= [(cx, cy) for cx, cy in self._neighbors(x, y) if self.occ[cx, cy] == -1]
+        if not empty: 
+            return 
+        free_slot = self._find_free_slot()
+        if free_slot is None:
+            return  # max agents reached
+
+        # Select a mate from the alive agents (excluding the current agent)
+        neigh = self._neighbors(x, y)
+        mates = [(cx, cy) for cx, cy in neigh if self.occ[cx, cy] != -1]
+        if not mates:
+            return 
+
+        mate_x, mate_y = mates[self.rng.integers(0, len(mates))]
+        mate_slot = self.occ[mate_x, mate_y]
+        child_genome = self._crossover(self.genome[slot], self.genome[mate_slot])
+        child_genome = self._mutate(child_genome, asexual=False)
+
+        cx, cy = empty[self.rng.integers(0, len(empty))]
         self.food[slot] -= tax
         self.spawn(free_slot, cx, cy, child_genome, tax)    #child inherits the taxed food
 
@@ -273,7 +319,10 @@ class World:
  
             # Reproduce (asexual for now)
             if self.food[slot] > p.repo_threshold:
-                self._reproduce_asexual(slot)
+                if p.sexual:
+                    self._reproduce_sexual(slot)
+                else:
+                    self._reproduce_asexual(slot)
  
             # Move
             if self.alive[slot]:
@@ -419,29 +468,29 @@ if __name__ == "__main__":
 
     #does the learning rate match plasticity_prob? --> build many agents at fixed distance and see
     # what fraction ends up with GP
-    p3 = Params(gene_length=10, plasticity=0.1, learning=True, seed=1,
-                max_agents=20000)
-    w3 = World(p3)
-    trials = 20000
-    genome_d02 = np.array([0, 0, 1, 1, 1, 1, 1, 1, 1, 1], dtype=np.uint8)  # d=0.2
-    got_gp = 0
-    for slot in range(trials):
-        w3.spawn(slot, 0, 0, genome_d02, p3.start_food)  # same cell is fine here
-        got_gp += w3.has_gp[slot]
-    expected = plasticity_prob(0.2, 0.1)
-    print(f"learning rate at d=0.2, rho=0.1: {got_gp/trials:.3f} "
-          f"(expected ~{expected:.3f})")
+    # p3 = Params(gene_length=10, plasticity=0.1, learning=True, seed=1,
+    #             max_agents=20000)
+    # w3 = World(p3)
+    # trials = 20000
+    # genome_d02 = np.array([0, 0, 1, 1, 1, 1, 1, 1, 1, 1], dtype=np.uint8)  # d=0.2
+    # got_gp = 0
+    # for slot in range(trials):
+    #     w3.spawn(slot, 0, 0, genome_d02, p3.start_food)  # same cell is fine here
+    #     got_gp += w3.has_gp[slot]
+    # expected = plasticity_prob(0.2, 0.1)
+    # print(f"learning rate at d=0.2, rho=0.1: {got_gp/trials:.3f} "
+    #       f"(expected ~{expected:.3f})")
 
 
     # Step 4 check: run the (uncalibrated) control for a bit and see
     # what the population does. Paper values give ~80 food/step income,
     # which is not going to sustain ~100+ agents paying tax every step --
     # expect a crash here. This sets up the calibration in Step 5.
-    p4 = Params(learning=False, seed=2)
-    log = run_simulation(p4, n_steps=201,log_every=20)
-    print("\nuncalibrated control run (pop every 20 steps):")
-    for t, pop in zip(log["t"], log["pop"]):
-        print(f"  t={t:4d}  pop={pop}")
+    # p4 = Params(learning=False, seed=2)
+    # log = run_simulation(p4, n_steps=201,log_every=20)
+    # print("\nuncalibrated control run (pop every 20 steps):")
+    # for t, pop in zip(log["t"], log["pop"]):
+    #     print(f"  t={t:4d}  pop={pop}")
 
 
 
@@ -449,25 +498,25 @@ if __name__ == "__main__":
     # Simulation 1 (paper's Figures 3 vs 4): does GG rise with learning
     # and stay flat without it? Same seed, same everything else.
     # --------------------------------------------------------------------
-    n_steps = 3000
-    p_learn = Params(learning=True, seed=2)
-    p_ctrl = Params(learning=False, seed=2)
+    # n_steps = 3000
+    # p_learn = Params(learning=True, seed=2)
+    # p_ctrl = Params(learning=False, seed=2)
  
-    log_learn = run_simulation(p_learn, n_steps=n_steps, log_every=10)
-    log_ctrl = run_simulation(p_ctrl, n_steps=n_steps, log_every=10)
+    # log_learn = run_simulation(p_learn, n_steps=n_steps, log_every=10)
+    # log_ctrl = run_simulation(p_ctrl, n_steps=n_steps, log_every=10)
  
-    print("\nGG% at end of run:")
-    print(f"  learning=True : {log_learn['gg'][-1]} / {log_learn['pop'][-1]} "
-          f"= {100*log_learn['gg'][-1]/max(1,log_learn['pop'][-1]):.1f}%")
-    print(f"  learning=False: {log_ctrl['gg'][-1]} / {log_ctrl['pop'][-1]} "
-          f"= {100*log_ctrl['gg'][-1]/max(1,log_ctrl['pop'][-1]):.1f}%")
+    # print("\nGG% at end of run:")
+    # print(f"  learning=True : {log_learn['gg'][-1]} / {log_learn['pop'][-1]} "
+    #       f"= {100*log_learn['gg'][-1]/max(1,log_learn['pop'][-1]):.1f}%")
+    # print(f"  learning=False: {log_ctrl['gg'][-1]} / {log_ctrl['pop'][-1]} "
+    #       f"= {100*log_ctrl['gg'][-1]/max(1,log_ctrl['pop'][-1]):.1f}%")
  
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
-    plot_run(log_learn, "Fig. 3 style: learning ON (rho=0.1)", ax=ax1)
-    plot_run(log_ctrl, "Fig. 4 style: learning OFF (control)", ax=ax2)
-    fig.tight_layout()
-    fig.savefig("sim1_learning_vs_control.png", dpi=120)
-    print("saved sim1_learning_vs_control.png")
+    # fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    # plot_run(log_learn, "Fig. 3 style: learning ON (rho=0.1)", ax=ax1)
+    # plot_run(log_ctrl, "Fig. 4 style: learning OFF (control)", ax=ax2)
+    # fig.tight_layout()
+    # fig.savefig("sim1_learning_vs_control.png", dpi=120)
+    # print("saved sim1_learning_vs_control.png")
 
 
     # --------------------------------------------------------------------

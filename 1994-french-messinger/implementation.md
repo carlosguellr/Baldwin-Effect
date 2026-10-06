@@ -20,3 +20,10 @@ This will look identical to the Baldwin effect but it is instead ordinary Darwin
 
 
 Can be fixed by reducing the possibility of a lucky hit (increasing gene length to 12 and averaging out across multiple seeds)
+
+
+# sexual reproduction
+Assumptions made for implementation:
+- Mate selection --> random mate amongst neighbors
+- Mate might later be chosen by a different neighbor
+- Child placement rules are identical to asexual
