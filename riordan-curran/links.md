@@ -1,2 +1,0 @@
-https://www.researchgate.net/publication/5140515_Cultural_Learning_in_a_Dynamic_Environment_an_Analysis_of_Both_Fitness_and_Diversity_in_Populations_of_Neural_Network_Agents
-
