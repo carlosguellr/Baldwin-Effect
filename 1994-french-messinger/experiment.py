@@ -101,7 +101,7 @@ class World:
         self.alive = np.zeros(n, dtype=np.bool_) 
         self.x = np.zeros(n, dtype=np.int32)
         self.y = np.zeros(n, dtype=np.int32)
-        self.food = np.zeros(n, dtype=np.int32)
+        self.food = np.zeros(n, dtype=np.float64)
         self.genome = np.zeros((n, L), dtype=np.uint8)
         self.has_gp = np.zeros(n, dtype=np.bool_)
         self.last_dir = np.zeros(n, dtype=np.int32)
@@ -200,9 +200,9 @@ class World:
 
     def _reproduce_asexual(self, slot):
         p = self.p
-        tax = p.repo_tax
-        if self.has_gp[slot] and p.gp_type == 3: 
-            tax /= p.gp_benefit     # reduce amount taxed for reproduction if GP is of type 3
+        
+        tax = p.repo_tax / p.gp_benefit if (self.has_gp[slot] and p.gp_type == 3) else p.repo_tax    # reduce amount taxed for reproduction if GP is of type 3
+        
         if self.food[slot] - tax < 0:
             return                  # can't afford to reproduce
 
@@ -219,7 +219,7 @@ class World:
         cx, cy = empty[self.rng.integers(0, len(empty))]
         child_genome = self._mutate(self.genome[slot], asexual=True)
         self.food[slot] -= tax
-        self.spawn(free_slot, cx, cy, child_genome, tax)    #child inherits the taxed food
+        self.spawn(free_slot, cx, cy, child_genome, p.repo_tax)    #child inherits the taxed food
 
     def _crossover(self, genome1, genome2):
         """Single-point crossover between two genomes."""
@@ -232,9 +232,7 @@ class World:
 
     def _reproduce_sexual(self, slot):
         p = self.p
-        tax = p.repo_tax
-        if self.has_gp[slot] and p.gp_type == 3: 
-            tax /= p.gp_benefit   
+        tax = p.repo_tax / p.gp_benefit if (self.has_gp[slot] and p.gp_type == 3) else p.repo_tax    # reduce amount taxed for reproduction if GP is of type 3
         if self.food[slot] - tax < 0:
             return                  # can't afford to reproduce
 
@@ -260,13 +258,12 @@ class World:
 
         cx, cy = empty[self.rng.integers(0, len(empty))]
         self.food[slot] -= tax
-        self.spawn(free_slot, cx, cy, child_genome, tax)    #child inherits the taxed food
+        self.spawn(free_slot, cx, cy, child_genome, p.repo_tax)    #child inherits the taxed food
 
     def _move(self, slot):
         """Move toward the neighbour cell with the most food.
  
-        ASSUMPTION: if the best cell is occupied, the agent stays put and
-        pays no movement tax.
+        Assumes that if the best cell is occupied the agent doesn't move and pays no move tax
         """
         p = self.p
         x, y = self.x[slot], self.y[slot]
@@ -284,7 +281,7 @@ class World:
             return  # blocked: stay, no tax
         tax = p.move_tax
         if self.has_gp[slot] and p.gp_type == 1:
-            tax /= p.gp_benefit
+            tax = tax / p.gp_benefit
         self.occ[x, y] = -1
         self.x[slot], self.y[slot] = nx, ny
         self.occ[nx, ny] = slot
@@ -305,7 +302,7 @@ class World:
             # Metabolize
             tax = p.meta_tax
             if self.has_gp[slot] and p.gp_type == 2:
-                tax /= p.gp_benefit
+                tax = tax / p.gp_benefit
             self.food[slot] -= tax
             if self.food[slot] <= 0:
                 self._kill(slot)
@@ -362,13 +359,9 @@ def run_simulation(p: Params, n_steps: int, log_every: int = 1):
             "hamming": np.array(hamming)}
 
 def run_multi_seed(base_params: Params, seeds, n_steps: int, log_every: int = 100):
-    """Run the same config across several seeds; return per-timestep mean/std
-    of population, GP% and GG% (percent of population with the Good Phene /
-    Good Gene), and mean Hamming distance to the Good Gene.
+    """Run the same config across several seeds and return per-timestep mean
+    of population, GP% and GG% and mean normalized hamming distance to the Good Gene.
 
-    GP%/GG% (not raw counts) are what get averaged across seeds, since
-    population size varies a lot between runs (boom-bust dynamics) and
-    raw counts from different-sized populations aren't comparable.
     If a run goes extinct early, its last value is held flat for the
     remaining timesteps so all seeds can still be stacked together.
     """
@@ -377,8 +370,7 @@ def run_multi_seed(base_params: Params, seeds, n_steps: int, log_every: int = 10
     for seed in seeds:
         p = replace(base_params, seed=seed)
         log = run_simulation(p, n_steps=n_steps, log_every=log_every)
-        if t_ref is None:
-            t_ref = log["t"]
+        t_ref = np.arange(0, n_steps, log_every)
         L = len(t_ref)
         n = len(log["pop"])  # may be < L if this run went extinct early
 
@@ -426,8 +418,7 @@ def run_multi_seed(base_params: Params, seeds, n_steps: int, log_every: int = 10
  
  
 def plot_multi_seed_comparison(res_learn, res_ctrl, title):
-    """Mean-only lines (no std shading) across four panels: population,
-    Good Phene %, Good Gene %, and mean Hamming distance to the Good Gene."""
+    """Four panels: population, Good Phene %, Good Gene %, and mean normalized hamming distance to the Good Gene."""
     fig, (ax0, ax1, ax2, ax3) = plt.subplots(1, 4, figsize=(22, 4.5))
  
     for res, label in [(res_learn, "Learning ON"), (res_ctrl, "Learning OFF (control)")]:
@@ -464,7 +455,7 @@ def plot_multi_seed_comparison(res_learn, res_ctrl, title):
  
 
 if __name__ == "__main__":
-    plot_plasticity()
+    # plot_plasticity()
 
     #does the learning rate match plasticity_prob? --> build many agents at fixed distance and see
     # what fraction ends up with GP
@@ -482,10 +473,7 @@ if __name__ == "__main__":
     #       f"(expected ~{expected:.3f})")
 
 
-    # Step 4 check: run the (uncalibrated) control for a bit and see
-    # what the population does. Paper values give ~80 food/step income,
-    # which is not going to sustain ~100+ agents paying tax every step --
-    # expect a crash here. This sets up the calibration in Step 5.
+    # Calibrating the food income. The paper's values only give 80 food per step.
     # p4 = Params(learning=False, seed=2)
     # log = run_simulation(p4, n_steps=201,log_every=20)
     # print("\nuncalibrated control run (pop every 20 steps):")
@@ -494,10 +482,8 @@ if __name__ == "__main__":
 
 
 
-    # --------------------------------------------------------------------
-    # Simulation 1 (paper's Figures 3 vs 4): does GG rise with learning
-    # and stay flat without it? Same seed, same everything else.
-    # --------------------------------------------------------------------
+
+    # Simulation 1: does GG rise with learning and stay flat without it? Same seed, same everything else.
     # n_steps = 3000
     # p_learn = Params(learning=True, seed=2)
     # p_ctrl = Params(learning=False, seed=2)
@@ -519,17 +505,7 @@ if __name__ == "__main__":
     # print("saved sim1_learning_vs_control.png")
 
 
-    # --------------------------------------------------------------------
-    # Multi-seed averaged comparison. This is the real Simulation-1 result:
-    # individual runs are noisy (see the drift-confound note in Params),
-    # so we average GG% across many seeds to see the actual expected
-    # difference between learning and no-learning.
-    #
-    # SLOW: each 5000-step run takes ~30-40s here, so N_SEEDS seeds x 2
-    # conditions can take a while (15 seeds -> roughly 15-20 minutes).
-    # Set RUN_MULTISEED = False to skip this and only run the quick
-    # checks above.
-    # --------------------------------------------------------------------
+    # Multi-seed averaged run comparison. Individual runs are subject to noise so average across many seeds 
     RUN_MULTISEED = True
     if RUN_MULTISEED:
         N_SEEDS = 15
@@ -541,7 +517,7 @@ if __name__ == "__main__":
         res_learn = run_multi_seed(Params(learning=True), seeds, N_STEPS, log_every=100)
         res_ctrl = run_multi_seed(Params(learning=False), seeds, N_STEPS, log_every=100)
  
-        print(f"final GG%% (mean +/- std across {N_SEEDS} seeds):")
+        print(f"final GG%% (mean across {N_SEEDS} seeds):")
         print(f"  learning=True : {res_learn['gg_pct_mean'][-1]:.1f}% "
               f"+/- {res_learn['gg_pct_std'][-1]:.1f}%")
         print(f"  learning=False: {res_ctrl['gg_pct_mean'][-1]:.1f}% "
