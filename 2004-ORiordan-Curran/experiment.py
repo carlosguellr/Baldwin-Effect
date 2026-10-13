@@ -1,5 +1,5 @@
 import numpy as np 
-from genome import GENOME_LEN
+from genome import GENOME_LEN, encode_node, N_IN, OUT, FIRST_HID
 from network import evaluate
 
 POP_SIZE = 200
@@ -35,7 +35,7 @@ def linear_rank(fitnesses):
     """
     n = len(fitnesses)
     uniq, inv, counts = np.unique(fitnesses, return_inverse=True, return_counts=True)
-    avg = (np.cumsum(counts) - counts) + (counts + 1) / 2
+    avg = (np.cumsum(counts) - counts) + (counts - 1) / 2
     return avg[inv] / (n-1)
 
 def roulette_wheel_selection(ranked, rng):
@@ -63,7 +63,31 @@ def next_generation(population, ranked, rng):
         new += [mutate(p1, MUTATION_RATE, rng), mutate(p2, MUTATION_RATE, rng)]
     return new 
 
-def run(mode, cycles, seed=0, generations=GENERATIONS, pop_size=POP_SIZE, learning_rate=0.3):
+
+
+def structured_genome(rng):
+    """Random genome built from valid node records, so the output is always wired to the inputs.
+    2-5 hidden nodes (each fed by 2-4 inputs, sometimes a lower hidden node), an output fed by
+    1+ hidden nodes; records are shuffled and the rest of the genome is padded with random bits."""
+    n_hid = int(rng.integers(2, 6))
+    labels = sorted(int(l) for l in rng.choice(np.arange(FIRST_HID, OUT), n_hid, replace=False))
+    w = lambda: rng.integers(-8, 8) / 2          # a random value on the 4-bit grid [-4, 3.5]
+    records = []
+    for i, lab in enumerate(labels):
+        srcs = [int(s) for s in rng.choice(N_IN, int(rng.integers(2, 5)), replace=False)]
+        if i > 0 and rng.random() < 0.5:
+            srcs.append(int(rng.choice(labels[:i])))
+        records.append(encode_node(lab, w(), [(s, w()) for s in srcs]))
+    srcs = [int(s) for s in rng.choice(labels, int(rng.integers(1, n_hid + 1)), replace=False)]
+    records.append(encode_node(OUT, w(), [(s, w()) for s in srcs]))
+    rng.shuffle(records)
+    g = "".join(records)
+    return g + "".join(map(str, rng.integers(0, 2, GENOME_LEN - len(g))))
+
+def random_bits_genome(rng):
+    return "".join(map(str, rng.integers(0, 2, GENOME_LEN )))
+
+def run(mode, cycles, seed=0, generations=GENERATIONS, pop_size=POP_SIZE, learning_rate=0.3, init="structured"):
     """
         One run of the algorithm. Mode is either "gradual" or "sudden".
         Cycles: backpropagations cycles per lifetime (0 = no learning)
@@ -71,7 +95,8 @@ def run(mode, cycles, seed=0, generations=GENERATIONS, pop_size=POP_SIZE, learni
     """
     rng = np.random.default_rng(seed)
     env = Environment()
-    population = ["".join(map(str, rng.integers(0, 2, GENOME_LEN))) for _ in range(pop_size)]
+    make = structured_genome if init == "structured" else random_bits_genome
+    population = [make(rng) for _ in range(pop_size)]
     mean_fitnesses, best_fitnesses = [], []
     for gen in range(generations):
         if mode == "gradual" and gen > 0 and gen % GRADUAL_CYCLES == 0 and env.next_flip < 16:
@@ -87,7 +112,7 @@ def run(mode, cycles, seed=0, generations=GENERATIONS, pop_size=POP_SIZE, learni
 
 if __name__ == "__main__":
     import time 
-    for cycles in (0, 20):
-        t0 = time.time()
-        m, b = run("sudden", cycles, generations=60)
-        print(f"cycles={cycles:2d}  {time.time() - t0:5.1f}s  mean@0={m[0]:.3f} mean@59={m[-1]:.3f}  best@59={b[-1]:.3f}")
+# for cycles in (0, 20):
+    t0 = time.time()
+    m, b = run("sudden", 50, generations=300, learning_rate=3.0)
+    print(f"cycles={50:2d}  {time.time() - t0:5.1f}s  mean@0={m[0]:.3f} mean@59={m[-1]:.3f}  best@59={b[-1]:.3f}")

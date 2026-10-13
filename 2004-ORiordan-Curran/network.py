@@ -66,7 +66,7 @@ class Network:
             self.thresholds += learning_rate * delta.mean(axis=0)  # update thresholds
 
 def raw_fitness(net, X, t):
-    return 1.0 - np.mean((net.output(X)-t)**2)
+    return np.mean(np.abs(net.output(X) - t) < 0.5)
 
 def evaluate(genome, X, t, cycles=0, learning_rate=0.3):
     nodes = decode(genome)
