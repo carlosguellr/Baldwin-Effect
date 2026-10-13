@@ -36,7 +36,7 @@ def linear_rank(fitnesses):
     n = len(fitnesses)
     uniq, inv, counts = np.unique(fitnesses, return_inverse=True, return_counts=True)
     avg = (np.cumsum(counts) - counts) + (counts + 1) / 2
-    ranks = avg[inv] / (n-1)
+    return avg[inv] / (n-1)
 
 def roulette_wheel_selection(ranked, rng):
     """Select indices proportionate to ranked fitness using roulette wheel selection."""
@@ -84,3 +84,10 @@ def run(mode, cycles, seed=0, generations=GENERATIONS, pop_size=POP_SIZE, learni
         population = next_generation(population, linear_rank(raw_fitnesses), rng)
     return np.array(mean_fitnesses), np.array(best_fitnesses)
 
+
+if __name__ == "__main__":
+    import time 
+    for cycles in (0, 20):
+        t0 = time.time()
+        m, b = run("sudden", cycles, generations=60)
+        print(f"cycles={cycles:2d}  {time.time() - t0:5.1f}s  mean@0={m[0]:.3f} mean@59={m[-1]:.3f}  best@59={b[-1]:.3f}")
