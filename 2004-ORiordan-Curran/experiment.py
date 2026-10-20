@@ -87,7 +87,7 @@ def structured_genome(rng):
 def random_bits_genome(rng):
     return "".join(map(str, rng.integers(0, 2, GENOME_LEN )))
 
-def run(mode, cycles, seed=0, generations=GENERATIONS, pop_size=POP_SIZE, learning_rate=0.3, init="structured"):
+def run(mode, cycles, seed=0, generations=GENERATIONS, pop_size=POP_SIZE, learning_rate=0.3, init="random"):
     """
         One run of the algorithm. Mode is either "gradual" or "sudden".
         Cycles: backpropagations cycles per lifetime (0 = no learning)

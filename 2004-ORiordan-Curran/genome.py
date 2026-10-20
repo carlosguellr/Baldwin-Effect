@@ -35,7 +35,12 @@ def random_genome(length=GENOME_LEN):
     return "".join(random.choice("01") for _ in range(length))
 
 def decode(genome):
-    """Return {label: (threshold, [(src_label, weight), ...])} for hidden/output nodes."""
+    """Return {label: (threshold, [(src_label, weight), ...])} for hidden/output nodes.
+    label: node id (4-11 for hidden nodes, 12 for output. 0-3 input bits
+    threshold: node's bias 
+    list holds node's incoming connections, each a (source label, weight) pair.
+    Connections from equal or higher labels are dropped, and for a repeated label the first record wins.
+    """
     nodes = {}
     p, n = 0, len(genome)
     while p + 4 <= n:
@@ -64,8 +69,6 @@ def decode(genome):
     return nodes
 
 
-
-# TESTING
 def _bits(v):
     return format(int(round(v * 2 + 8)), "04b")
 def encode_node(label, thr, conns):
@@ -74,9 +77,9 @@ def encode_node(label, thr, conns):
         s += format(src, "04b") + _bits(w)
     return s + END
 
-if __name__ == "__main__":
-    g = encode_node(4, 0.5, [(0, 1.0), (1, -2.0)]) + encode_node(12, -1.0, [(4, 3.0), (2, 0.5)])
-    print(decode(g))
-    # expected: {4: (0.5, [(0, 1.0), (1, -2.0)]), 12: (-1.0, [(4, 3.0), (2, 0.5)])}
-    nodes = decode(random_genome())
-    print(len(nodes), "nodes decoded from a random genome; output defined:", OUT in nodes)
+# if __name__ == "__main__":
+#     g = encode_node(4, 0.5, [(0, 1.0), (1, -2.0)]) + encode_node(12, -1.0, [(4, 3.0), (2, 0.5)])
+#     print(decode(g))
+#     # expected: {4: (0.5, [(0, 1.0), (1, -2.0)]), 12: (-1.0, [(4, 3.0), (2, 0.5)])}
+#     nodes = decode(random_genome())
+#     print(len(nodes), "nodes decoded from a random genome; output defined:", OUT in nodes)

@@ -7,6 +7,7 @@ import numpy as np
 from genome import decode, N_IN, OUT
 
 N_LABELS = OUT + 1  # number of nodes in the network (input + hidden + output)
+DECISION_MARGIN = 1e-6    # raw fitness output must be at least this far on the correct side of 0.5 
 
 def sigmoid(z):
     return 1.0 / (1.0 + np.exp(-z))
@@ -66,7 +67,7 @@ class Network:
             self.thresholds += learning_rate * delta.mean(axis=0)  # update thresholds
 
 def raw_fitness(net, X, t):
-    return np.mean(np.abs(net.output(X) - t) < 0.5)
+    return np.mean(np.abs(net.output(X) - t) < 0.5 - DECISION_MARGIN)
 
 def evaluate(genome, X, t, cycles=0, learning_rate=0.3):
     nodes = decode(genome)
