@@ -39,7 +39,7 @@ def summarise(mode, runs, n_gen):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", default="results")
+    ap.add_argument("--dir", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results"))
     ap.add_argument("--learn-cycles", type=int, default=50)
     ap.add_argument("--out", default="figures.png")
     a = ap.parse_args()
@@ -58,10 +58,9 @@ if __name__ == "__main__":
             ax.text(0.5, 0.5, "no results", ha="center", transform=ax.transAxes)
             continue
         n_gen = runs.shape[1]
-        m, sd = runs.mean(axis=0), runs.std(axis=0)
+        m = runs.mean(axis=0)
         for g in change_gens(mode, n_gen):
             ax.axvline(g, color="grey", ls=":", lw=0.7)
-        ax.fill_between(range(n_gen), m - sd, m + sd, alpha=0.2)
         ax.plot(m, lw=1.3)
         print(f"{title}\n{summarise(mode, runs, n_gen)}")
     axes[0, 0].set_ylabel("Mean fitness (fraction correct)")
