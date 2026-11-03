@@ -1,6 +1,4 @@
 """
-keras_check.py - compare our hand-written numpy agents with an equivalent Keras implementation.
-
 WHAT IT DOES
     Part 1  train N agents on both implementations and compare their outputs
             and fitness, and time each implementation per agent.
@@ -31,7 +29,6 @@ os.environ.setdefault("KERAS_BACKEND", "jax")      # must be set before keras is
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
-import argparse
 import time
 import numpy as np
 import keras
@@ -48,9 +45,7 @@ def decision_fitness(out, t, margin=MARGIN):
     return float(np.mean(np.abs(out - t) < 0.5 - margin))
 
 
-# ----------------------------------------------------------------------------------------------
-# Keras implementation of one agent
-# ----------------------------------------------------------------------------------------------
+
 def build_keras_model(nodes):
     """Build a Keras model with the same sparse wiring as Network(nodes)
         nodes is the dict returned by genome.decode(). 
@@ -62,13 +57,13 @@ def build_keras_model(nodes):
     tensors = {i: inputs[i] for i in range(N_IN)}              # label -> that node's output tensor
     layers = {}                                                # label -> (layer, kernel, bias)
 
-    # Nodes are built from low to high label, so every source already exists
-    # (the decoder only keeps connections from lower labels).
+    # Nodes are built from low to high label
     for label in sorted(nodes):
         threshold, conns = nodes[label]
 
-        # Same filtering as Network.__init__: ignore sources that are neither inputs nor defined
-        # nodes. A repeated source overwrites the earlier weight, like W[src, label] = w does.
+        # Same filtering as Network.__init__
+        # ignore sources that are neither inputs nor defined nodes. 
+        # A repeated source overwrites the earlier weight.
         weights = {}
         for src, w in conns:
             if src < N_IN or src in nodes:
@@ -81,7 +76,6 @@ def build_keras_model(nodes):
             kernel = np.array([[weights[s]] for s in srcs], dtype="float32")
         else:
             # No usable inputs: our numpy node outputs sigmoid(-threshold) for every pattern.
-            # Reproduce that with a zero input and a zero kernel (only the bias, -threshold, matters).
             x = keras.layers.Lambda(lambda z: z * 0.0)(inputs[0])
             kernel = np.zeros((1, 1), dtype="float32")
 
@@ -104,9 +98,9 @@ def evaluate_keras(genome, X, t, cycles, learning_rate):
         out = np.full(len(X), 0.5)
         return decision_fitness(out, t), out
 
-    cols = [X[:, i:i + 1] for i in range(N_IN)]                # Keras wants one array per Input
+    cols = [X[:, i:i + 1] for i in range(N_IN)]                # Keras requires one array per Input
     if cycles > 0:
-        # learning_rate / 2 compensates for Keras's mse having a factor 2 (see module docstring)
+        # learning_rate / 2 compensates for Keras's mse having a factor 2
         model.compile(optimizer=keras.optimizers.SGD(learning_rate=learning_rate / 2), loss="mse")
         model.fit(cols, t, epochs=cycles, batch_size=len(X), shuffle=False, verbose=0)
     out = np.asarray(model(cols)).ravel()
@@ -130,7 +124,6 @@ def test1_comparison(n_agents, cycles, lr, seed):
     rng = np.random.default_rng(seed)
     env = E.Environment()
     # Half structured genomes half random-bit genomes
-    # (these contain the odd cases: no output node, disconnected nodes, repeated connections).
     genomes = [E.structured_genome(rng) if i % 2 == 0 else E.random_bits_genome(rng)
                for i in range(n_agents)]
 
@@ -179,27 +172,24 @@ def mini_experiment(evaluator, pop_size, generations, flip_at, cycles, lr, seed)
     return np.array(means), np.array(bests), time.perf_counter() - t0
 
 
-# ----------------------------------------------------------------------------------------------
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--agents", type=int, default=30, help="agents in the agreement test (part 1)")
-    ap.add_argument("--pop", type=int, default=20, help="population size of the mini experiment")
-    ap.add_argument("--gens", type=int, default=6, help="generations of the mini experiment")
-    ap.add_argument("--cycles", type=int, default=50, help="training cycles per lifetime")
-    ap.add_argument("--lr", type=float, default=3.0, help="learning rate (our convention)")
-    ap.add_argument("--cores", type=int, default=20, help="cores assumed in the cost projection")
-    ap.add_argument("--seed", type=int, default=1)
-    a = ap.parse_args()
+    AGENTS = 30      # agents in the first test
+    POP = 20         # population size of the mini experiment
+    GENS = 6         # generations of the mini experiment
+    CYCLES = 50      # training cycles per lifetime
+    LR = 3.0         # learning rate
+    CORES = 20       # cores assumed in the cost projection
+    SEED = 1
     lines = []
 
     def say(s=""):
         print(s, flush=True)
         lines.append(s)
 
-    say(f"Settings: {a.cycles} cycles per lifetime, learning rate {a.lr}, Keras backend: {keras.backend.backend()}")
+    say(f"Settings: {CYCLES} cycles per lifetime, learning rate {LR}, Keras backend: {keras.backend.backend()}")
  
     # Agreement test: the same genomes trained on both implementations.
-    r = test1_comparison(a.agents, a.cycles, a.lr, a.seed)
+    r = test1_comparison(AGENTS, CYCLES, LR, SEED)
     say("\nAgreement on identical genomes")
     say(f"  agents tested: {r['n']}")
     say(f"  largest output difference (any agent, any pattern): {r['max_diff']:.2e}   median over agents: {r['median_diff']:.2e}")
@@ -207,13 +197,13 @@ if __name__ == "__main__":
     say()
  
     # Mini experiment: the real GA, run once per implementation with the same seed.
-    flip = a.gens // 2
+    flip = GENS // 2
     m_np, b_np, s_np = mini_experiment(lambda g, X, t, c, lr: numpy_outputs(g, X, t, c, lr)[0],
-                                       a.pop, a.gens, flip, a.cycles, a.lr, a.seed)
+                                       POP, GENS, flip, CYCLES, LR, SEED)
     m_k, b_k, s_k = mini_experiment(lambda g, X, t, c, lr: evaluate_keras(g, X, t, c, lr)[0],
-                                    a.pop, a.gens, flip, a.cycles, a.lr, a.seed)
-    say(f"\nMini experiment ({a.pop} agents x {a.gens} generations, sudden flip at generation {flip})")
-    say("  generation      " + " ".join(f"{g:6d}" for g in range(a.gens)))
+                                    POP, GENS, flip, CYCLES, LR, SEED)
+    say(f"\nMini experiment ({POP} agents x {GENS} generations, sudden flip at generation {flip})")
+    say("  generation      " + " ".join(f"{g:6d}" for g in range(GENS)))
     say("  mean  numpy     " + " ".join(f"{v:6.3f}" for v in m_np))
     say("  mean  Keras     " + " ".join(f"{v:6.3f}" for v in m_k))
     say("  best  numpy     " + " ".join(f"{v:6.3f}" for v in b_np))
@@ -229,8 +219,8 @@ if __name__ == "__main__":
     learning_runs = 2 * 20                       # gradual + sudden, 20 repeats each
     say("\nProjected cost of the full experiment")
     for name, ms in (("numpy", r["ms_np"]), ("Keras", r["ms_keras"])):
-        hours_on_cores = agents_per_run * learning_runs * ms / 1000 / 3600 / a.cores
-        say(f"    {name}: {agents_per_run * ms / 1000 / 60:7.1f} min per run | about {hours_on_cores:5.1f} h on {a.cores} cores")
+        hours_on_cores = agents_per_run * learning_runs * ms / 1000 / 3600 / CORES
+        say(f"    {name}: {agents_per_run * ms / 1000 / 60:7.1f} min per run | about {hours_on_cores:5.1f} h on {CORES} cores")
     say("  (from the per-agent times above)")
  
     with open("keras_vs_numpy.txt", "w") as f:
