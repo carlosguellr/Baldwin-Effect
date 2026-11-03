@@ -1,6 +1,6 @@
 """Run all four conditions (gradual/sudden x no learning/learning) over many seeds in parallel.
-Each finished run is saved to results/<mode>_c<cycles>_s<seed>.npz, so the script can be
-stopped and restarted: finished runs are skipped."""
+The results ar esaved into file results.npz. 
+"""
 import os
 os.environ["OMP_NUM_THREADS"] = "1"        # one BLAS thread per worker; we parallelise over runs instead
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -17,19 +17,17 @@ from network import evaluate
 LEARN_CYCLES = 50
 LEARNING_RATE = 3.0
 CONDITIONS = [("gradual", 0), ("gradual", LEARN_CYCLES), ("sudden", 0), ("sudden", LEARN_CYCLES)]
-OUT_DIR = "results"
+RESULTS_FILE = "results.npz"
 
-
-def path(mode, cycles, seed):
-    return os.path.join(OUT_DIR, f"{mode}_c{cycles}_s{seed}.npz")
-
+def key(mode, cycles, seed):
+    """Name of one run inside results.npz; the arrays are stored as <key>_mean and <key>_best."""
+    return f"{mode}_c{cycles}_s{seed}"
 
 def job(args):
     mode, cycles, seed, generations = args
     t0 = time.time()
     mean_f, best_f = E.run(mode, cycles, seed=seed, generations=generations, learning_rate=LEARNING_RATE)
-    np.savez(path(mode, cycles, seed), mean=mean_f, best=best_f)
-    return mode, cycles, seed, time.time() - t0
+    return mode, cycles, seed, mean_f, best_f, time.time() - t0
 
 
 if __name__ == "__main__":
@@ -43,12 +41,19 @@ if __name__ == "__main__":
     env = E.Environment()
     assert evaluate("0" * GENOME_LEN, env.X, env.t) == 0.0, "network.raw_fitness is not decision-based"
 
-    os.makedirs(OUT_DIR, exist_ok=True)
-    jobs = [(m, c, s, a.generations) for c in sorted({c for _, c in CONDITIONS}, reverse=True)
-            for m, cc in CONDITIONS if cc == c for s in range(a.repeats)
-            if not os.path.exists(path(m, c, s))]
-    print(f"{len(jobs)} runs to do on {a.workers} workers (learning runs are queued first)", flush=True)
+    # Load runs finished earlier (if any) and only queue the missing ones, learning runs first (slowest).
+    results = dict(np.load(RESULTS_FILE)) if os.path.exists(RESULTS_FILE) else {}
+    jobs = [(m, c, s, a.generations)
+            for m, c in sorted(CONDITIONS, key=lambda mc: -mc[1])
+            for s in range(a.repeats)
+            if key(m, c, s) + "_mean" not in results]
+    print(f"{len(jobs)} runs to do on {a.workers} workers", flush=True)
+ 
     t0 = time.time()
     with Pool(a.workers) as pool:
-        for i, (m, c, s, dt) in enumerate(pool.imap_unordered(job, jobs), 1):
+        for i, (m, c, s, mean_f, best_f, dt) in enumerate(pool.imap_unordered(job, jobs), 1):
+            results[key(m, c, s) + "_mean"] = mean_f
+            results[key(m, c, s) + "_best"] = best_f
+            np.savez(RESULTS_FILE, **results)          # rewrite the file after every run
             print(f"[{i}/{len(jobs)}] {m} cycles={c} seed={s} done in {dt:.0f}s (elapsed {time.time() - t0:.0f}s)", flush=True)
+ 
