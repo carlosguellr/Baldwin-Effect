@@ -15,8 +15,9 @@ Furthermore, the learning populations reach overall higher fitness and have a su
 # critique
 
 good
-- clean, controllable with only difference between trials is backpropagation. Same seeds give same starting populations
+- clean, controllable with only difference between trials is backpropagation. 
 - transferring structure only avoids potential lamarckiaan 
+- baldwin effect is tested by exploring changes in the organisms' environment, which is explored via their fitness, rather than simply exploring the fitness/population trend over time --> explores under a different view
 
 
 

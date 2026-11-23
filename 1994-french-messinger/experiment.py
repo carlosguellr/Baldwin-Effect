@@ -23,26 +23,18 @@ def plot_plasticity(show=True):
     """
 
     x = np.linspace(0, 1, 501)
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(6, 4))
 
-    #fig 1: rho = 0.1 
-    a1.plot(x, plasticity_prob(x, 0.1))
-    a1.scatter([0.2], [plasticity_prob(0.2, 0.1)], color='red', zorder=3)
-    a1.annotate(f"Plasticity probability at d=0.2: {plasticity_prob(0.2, 0.1):.2f}", 
-                (0.2, plasticity_prob(0.2, 0.1)), xytext=(0.35, 0.3))
-    a1.set_title("Fig 1. Plasticity probability for rho=0.1")
-
-    #fig 2: family of curves (rho 0.01, 0.2, 1.5, 6.0)
+    # family of curves (rho 0.01, 0.2, 1.5, 6.0)
     for rho in [0.01, 0.2, 1.5, 6.0]:
-        a2.plot(x, plasticity_prob(x, rho), label=f"rho={rho}")
-    a2.legend()
-    a2.set_title("Fig 2. Plasticity probability for varying rho values")
+        ax.plot(x, plasticity_prob(x, rho), label=f"rho={rho}")
+    ax.legend()
+    ax.set_title("Plasticity probability for varying rho values")
+    ax.set_xlabel("Normalized Hamming distance from GG")
+    ax.set_ylabel("Plasticity probability (learn good phene)")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
 
-    for ax in [a1, a2]:
-        ax.set_xlabel("Normalized Hamming distance from GG")
-        ax.set_ylabel("Plasticity probability (learn good gene)")
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
     fig.tight_layout()
     if show:
         plt.show()
@@ -455,7 +447,7 @@ def plot_multi_seed_comparison(res_learn, res_ctrl, title):
  
 
 if __name__ == "__main__":
-    # plot_plasticity()
+    plot_plasticity()
 
     #does the learning rate match plasticity_prob? --> build many agents at fixed distance and see
     # what fraction ends up with GP
