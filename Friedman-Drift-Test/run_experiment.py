@@ -24,6 +24,8 @@ Per generation, each run logs the BEST genome of that generation:
     enabled_connections  number of active connections in the best genome
     n_params             number of trainable parameters in the best genome
     n_species            number of species in the population
+    in_x0 .. in_x9       1 if input xi has an enabled path to the output in the best genome
+    pop_in_x0 .. x9      fraction of the population with an enabled path from xi to the output
 
 
 outputs results in results/<condition>/seed_<NN>.csv
@@ -37,7 +39,7 @@ import neat
 import numpy as np
 import pandas as pd
 
-from friedman_data import CONCEPTS, GENERATIONS, block_for_generation, make_blocks
+from friedman_data import CONCEPTS, DRIFT_GENS, GENERATIONS, block_for_generation, make_blocks
 from learning import GenomeNet
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -50,6 +52,22 @@ WORKERS = os.cpu_count()   # parallel processes; set to 1 to run one after anoth
 LEARN_STEPS = 20           # lifetime learning: Adam steps per genome
 LEARN_RATE = 0.05          # lifetime learning: Adam step size
 
+OUTPUT_ACTIVATION = "identity" 
+class FixedOutputGenome(neat.DefaultGenome):
+    """DefaultGenome whose output node always uses OUTPUT_ACTIVATION.
+    Hidden nodes can still switch between the activation_options."""
+
+    def _fix_output(self, config):
+        for key in config.output_keys:
+            self.nodes[key].activation = OUTPUT_ACTIVATION
+
+    def configure_new(self, config):
+        super().configure_new(config)      # initial population
+        self._fix_output(config)
+
+    def mutate(self, config):
+        super().mutate(config)             # every offspring is mutated after crossover
+        self._fix_output(config)
 
 # ---------- evaluation ----------
 def evaluate_genome(genome, config, block, condition):
@@ -90,6 +108,7 @@ def make_eval_function(state, condition):
 
         _, *state["gen_best"] = min(scored, key=lambda s: s[0])
         state["pop_mean_val_MAE"] = float(np.mean([s[0] for s in scored]))
+        state["pop_input_frac"] = np.mean([s[2].input_mask for s in scored], axis=0)
     return eval_genomes
 
 
@@ -103,17 +122,25 @@ def run_seed(condition, seed, verbose=False):
     np.random.seed(seed)
     blocks = make_blocks(seed)
 
-    config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
+    config = neat.Config(FixedOutputGenome, neat.DefaultReproduction,
                          neat.DefaultSpeciesSet, neat.DefaultStagnation, CONFIG_PATH)
     pop = neat.Population(config)
 
-    state = {"block": None, "gen_best": None, "pop_mean_val_MAE": None}
+    state = {"block": None, "gen_best": None, "pop_mean_val_MAE": None, "pop_input_frac": None}
     eval_genomes = make_eval_function(state, condition)
 
     log, t0 = [], time.time()
     for g in range(GENERATIONS):
         b = block_for_generation(g)
         state["block"] = blocks[b]                 # switch concept at the drift points
+
+        # At a drift, NEATs best fitnesses refers to the previous concept
+        # so every species would look stagnant. 
+        # Clear the history so improvement is judged on new concept.
+        if g in DRIFT_GENS:
+            for species in pop.species.species.values():
+                species.fitness_history = []
+
         pop.run(eval_genomes, 1)                   # evolve exactly one generation
 
         genome, net, theta = state["gen_best"]
@@ -131,6 +158,9 @@ def run_seed(condition, seed, verbose=False):
             "enabled_connections": sum(c.enabled for c in genome.connections.values()),
             "n_params": len(net.theta0),
             "n_species": len(pop.species.species),
+            # Input connectivity: best genome (0/1) and population fraction, per input
+            **{f"in_x{i}": int(m) for i, m in enumerate(net.input_mask)},
+            **{f"pop_in_x{i}": float(f) for i, f in enumerate(state["pop_input_frac"])},
         })
         if verbose and (g % 25 == 0 or g == GENERATIONS - 1):
             r = log[-1]

@@ -6,7 +6,8 @@ produces
     <condition>/summary.csv   per-generation mean and standard deviation over seeds
     comparison.png            mean test MAE of the best genome per generation for every
                               condition, with a +/- 1 std band, plus the innate
-                              (pre-learning) test MAE for every condition that learns
+                              (pre-learning) test MAE for every condition that learns.
+                              If it already exists, saves as comparison_1.png, _2, ... instead
 
 Usage
     python plot_results.py
@@ -44,6 +45,16 @@ def summarise(runs):
     summary = runs.groupby("generation")[METRICS].agg(["mean", "std"])
     summary.columns = [f"{m}_{stat}" for m, stat in summary.columns]   # flatten column names
     return summary.reset_index()
+
+
+def unique_path(path):
+    """Return path unchanged if it is free, otherwise add _1, _2, ... before the extension."""
+    base, ext = os.path.splitext(path)
+    i = 1
+    while os.path.exists(path):
+        path = f"{base}_{i}{ext}"
+        i += 1
+    return path
 
 
 def find_conditions():
@@ -108,7 +119,7 @@ def main():
         summaries[cond].to_csv(os.path.join(out_dir, "summary.csv"), index=False)
         print(f"{cond}: {n_seeds[cond]} seeds -> {out_dir}/summary.csv")
 
-    out_path = os.path.join(RESULTS_DIR, "comparison.png")
+    out_path = unique_path(os.path.join(RESULTS_DIR, "comparison.png"))
     plot_mae(summaries, n_seeds, out_path)
     print(f"saved {out_path}")
 

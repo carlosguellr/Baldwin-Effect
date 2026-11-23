@@ -78,6 +78,11 @@ class GenomeNet:
             self.plan.append((node, ACTIVATIONS[gene.activation], bias_idx, response, inputs))
 
         self.theta0 = np.array(theta, dtype=float)    # birth (innate) parameters
+
+        # Which inputs have an enabled path to the output. The plan only holds nodes
+        # the output depends on, so any input feeding a planned node reaches the output.
+        used = {in_node for *_, inputs in self.plan for in_node, _ in inputs}
+        self.input_mask = np.array([k in used for k in self.input_keys])
         self.lo, self.hi = np.array(lo), np.array(hi)
 
     # ---------- forward pass ----------

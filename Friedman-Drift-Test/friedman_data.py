@@ -1,5 +1,5 @@
 """
-Builds the drifting regression environment used by every experiment.
+Builds the drifting regression dataset.
 
 river's ``FriedmanDrift`` generator with ``drift_type="gra"``(Global Recurring Abrupt)
 
