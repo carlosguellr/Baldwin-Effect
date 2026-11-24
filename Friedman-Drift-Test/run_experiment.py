@@ -17,8 +17,7 @@ Per generation, each run logs the BEST genome of that generation:
     val_MAE              validation MAE after learning (what selection used, i.e. -fitness)
     test_MAE             MAE on the held-out test set of the current concept, after learning
     innate_test_MAE      test MAE with the birth weights, before any lifetime learning
-                         (identical to test_MAE for darwinian; for baldwinian, this
-                         falling over generations is the Baldwin effect)
+                         (identical to test_MAE for darwinian)
     pop_mean_val_MAE     mean validation MAE of the whole population
     hidden_nodes         number of hidden nodes in the best genome
     enabled_connections  number of active connections in the best genome
@@ -48,15 +47,18 @@ RESULTS_DIR = os.path.join(HERE, "results")
 
 CONDITIONS = ["darwinian", "baldwinian"]
 N_SEEDS = 20              # runs seeds 0 .. N_SEEDS-1 for every condition
-WORKERS = os.cpu_count()   # parallel processes; set to 1 to run one after another
+WORKERS = os.cpu_count()   # parallel processes; set to 1 to run in serial
 LEARN_STEPS = 20           # lifetime learning: Adam steps per genome
 LEARN_RATE = 0.05          # lifetime learning: Adam step size
 
 OUTPUT_ACTIVATION = "identity" 
+
 class FixedOutputGenome(neat.DefaultGenome):
     """DefaultGenome whose output node always uses OUTPUT_ACTIVATION.
-    Hidden nodes can still switch between the activation_options."""
-
+    Hidden nodes can still switch between the activation_options.
+    This is necessary because neat stores hidden nodes and output nodes in the same way 
+    (and activation can be mutated)
+    """
     def _fix_output(self, config):
         for key in config.output_keys:
             self.nodes[key].activation = OUTPUT_ACTIVATION
@@ -69,7 +71,6 @@ class FixedOutputGenome(neat.DefaultGenome):
         super().mutate(config)             # every offspring is mutated after crossover
         self._fix_output(config)
 
-# ---------- evaluation ----------
 def evaluate_genome(genome, config, block, condition):
     """Score one genome on the current concept block.
 
@@ -90,19 +91,19 @@ def evaluate_genome(genome, config, block, condition):
 def make_eval_function(state, condition):
     """Build the fitness function neat-python calls once per generation.
 
-    ``state["block"]`` holds the concept block. It is updated by the
+    state["block"] holds the concept block. It is updated by the
     run loop when the environment drifts, so the same function always scores
     genomes on the current concept.
 
-    The best genome of this generation is stored in ``state["gen_best"]``, because
-    ``Population.run`` returns the best genome EVER seen, which after a drift
+    The best genome of this generation is stored in state["gen_best"], because
+    Population.run returns the best genome EVER seen, which after a drift
     can be a stale genome scored on the old concept.
     """
     def eval_genomes(genomes, config):
         scored = []
         for _, genome in genomes:
             net, theta, val_mae = evaluate_genome(genome, config, state["block"], condition)
-            # Selection uses the validation set, never the test set
+            # Selection uses the validation set
             genome.fitness = -val_mae
             scored.append((val_mae, genome, net, theta))
 
@@ -118,7 +119,7 @@ def run_seed(condition, seed, verbose=False):
     The seed fixes both the data and NEAT's random choices, so the same seed
     gives the same data in every condition.
     """
-    random.seed(seed)          # neat-python uses Python's random module
+    random.seed(seed)          # neat-python uses Python's random module, not numpy's
     np.random.seed(seed)
     blocks = make_blocks(seed)
 
@@ -134,8 +135,7 @@ def run_seed(condition, seed, verbose=False):
         b = block_for_generation(g)
         state["block"] = blocks[b]                 # switch concept at the drift points
 
-        # At a drift, NEATs best fitnesses refers to the previous concept
-        # so every species would look stagnant. 
+        # At a drift, NEATs best fitnesses refers to the previous concept so every species looks stagnant. 
         # Clear the history so improvement is judged on new concept.
         if g in DRIFT_GENS:
             for species in pop.species.species.values():
