@@ -47,7 +47,7 @@ CONFIG_PATH = os.path.join(HERE, "neat_config.ini")
 RESULTS_DIR = os.path.join(HERE, "results")
 
 CONDITIONS = ["darwinian", "baldwinian"]
-N_SEEDS = 20               # runs seeds 0 .. N_SEEDS-1 for every condition
+N_SEEDS = 20              # runs seeds 0 .. N_SEEDS-1 for every condition
 WORKERS = os.cpu_count()   # parallel processes; set to 1 to run one after another
 LEARN_STEPS = 20           # lifetime learning: Adam steps per genome
 LEARN_RATE = 0.05          # lifetime learning: Adam step size

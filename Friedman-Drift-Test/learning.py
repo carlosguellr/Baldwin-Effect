@@ -25,7 +25,8 @@ from neat.nn import FeedForwardNetwork
 from friedman_data import Y_CENTRE, Y_SCALE
 
 
-# ---------- activation functions (must match neat/activations.py exactly) ----------
+# activation functions, made to match neat ones exactly. 
+# written with anp rather than np so autograd can differentiate them
 ACTIVATIONS = {
     "sigmoid":  lambda z: 1.0 / (1.0 + anp.exp(-anp.clip(5.0 * z, -60.0, 60.0))),
     "tanh":     lambda z: anp.tanh(anp.clip(2.5 * z, -60.0, 60.0)),
@@ -35,7 +36,7 @@ ACTIVATIONS = {
     "identity": lambda z: z,
 }
 
-# Adam hyper-parameters (standard defaults)
+# Adam hyperparameters
 BETA1, BETA2, EPS = 0.9, 0.999, 1e-8
 
 
@@ -43,17 +44,17 @@ class GenomeNet:
     """Vectorised, differentiable version of a NEAT feed-forward network."""
 
     def __init__(self, genome, config):
-        gc = config.genome_config
+        gc = config.genome_config # neat configuration
         self.input_keys = gc.input_keys
-        self.output_key = gc.output_keys[0]           # this task has a single output
+        self.output_key = gc.output_keys[0]           # single output
 
-        # Let neat-python decide which nodes are used and in what order,
-        # so this network is guaranteed to have the same structure
+        # Build neat pythons network from the genome. 
+        # never used for prediction but used as reference to ensure GenomeNet is built the same way
         reference = FeedForwardNetwork.create(genome, config)
 
         theta, lo, hi = [], [], []
-        self.param_keys = []    # per theta entry: ("bias", node) or ("weight", (in_node, node))
-        self.plan = []          # per node: (node, activation, bias index, response, [(in_node, weight index)])
+        self.param_keys = []    # per theta entry: ("bias", node_id) or ("weight", (source_id, node_id))
+        self.plan = []          # per node: (node_id, activation, bias index, response, [(source_id, weight index)])
 
         def add_param(value, key, bounds):
             """Append one parameter to theta and return its index."""
@@ -65,36 +66,56 @@ class GenomeNet:
 
         bias_bounds = (gc.bias_min_value, gc.bias_max_value)
         weight_bounds = (gc.weight_min_value, gc.weight_max_value)
-        for node, _, _, bias, response, links in reference.node_evals:
-            gene = genome.nodes[node]
+        for node_id, _, _, bias, response, links in reference.node_evals:
+            gene = genome.nodes[node_id]
             if gene.activation not in ACTIVATIONS:
                 raise ValueError(f"Activation '{gene.activation}' has no differentiable version")
             if gene.aggregation != "sum":
                 raise ValueError("Only 'sum' aggregation is supported")
 
-            bias_idx = add_param(bias, ("bias", node), bias_bounds)
-            inputs = [(in_node, add_param(w, ("weight", (in_node, node)), weight_bounds))
-                      for in_node, w in links]
-            self.plan.append((node, ACTIVATIONS[gene.activation], bias_idx, response, inputs))
+            bias_idx = add_param(bias, ("bias", node_id), bias_bounds)
+
+            # Each incoming connection: (node it comes from, position of its weight in theta)
+            incoming = []
+            for source_id, weight in links:
+                weight_idx = add_param(weight, ("weight", (source_id, node_id)), weight_bounds)
+                incoming.append((source_id, weight_idx))
+
+            self.plan.append((node_id, ACTIVATIONS[gene.activation], bias_idx, response, incoming))
 
         self.theta0 = np.array(theta, dtype=float)    # birth (innate) parameters
 
         # Which inputs have an enabled path to the output. The plan only holds nodes
         # the output depends on, so any input feeding a planned node reaches the output.
-        used = {in_node for *_, inputs in self.plan for in_node, _ in inputs}
+        used = set()
+        for _, _, _, _, incoming in self.plan:
+            for source_id, _ in incoming:
+                used.add(source_id)
         self.input_mask = np.array([k in used for k in self.input_keys])
         self.lo, self.hi = np.array(lo), np.array(hi)
 
     # ---------- forward pass ----------
     def forward(self, theta, X):
-        """Network output for every row of X, on the scaled (-1..1) target scale."""
-        n = X.shape[0]
-        values = {k: X[:, i] for i, k in enumerate(self.input_keys)}
-        for node, act, bias_idx, response, inputs in self.plan:
-            s = sum((values[in_node] * theta[w_idx] for in_node, w_idx in inputs), anp.zeros(n))
-            values[node] = act(theta[bias_idx] + response * s)
-        # An output with no path from the inputs stays 0, as in neat-python
-        return values.get(self.output_key, anp.zeros(n))
+        """Run the network on every row of X at once (scaled -1..1 target range)."""
+        n_samples = X.shape[0]
+
+        # outputs[node_id] = that node's output for every sample.
+        # Input nodes simply output their column of X.
+        outputs = {}
+        for column, input_id in enumerate(self.input_keys):
+            outputs[input_id] = X[:, column]
+
+        # Compute the remaining nodes in order. Each node's inputs are already in `outputs`.
+        for node_id, activation, bias_idx, response, incoming in self.plan:
+            total = anp.zeros(n_samples)
+            for source_id, weight_idx in incoming:
+                total = total + outputs[source_id] * theta[weight_idx]
+            outputs[node_id] = activation(theta[bias_idx] + response * total)
+
+        # If nothing connects to the output node, the network predicts 0 (as in neat-python)
+        if self.output_key not in outputs:
+            return anp.zeros(n_samples)
+        return outputs[self.output_key]
 
     def predict(self, theta, X):
         """Predictions in original target units."""
@@ -106,6 +127,11 @@ class GenomeNet:
         return float(np.mean(np.abs(self.predict(theta, X) - y)))
 
     # ---------- lifetime learning ----------
+    def loss(self, theta, X, y_scaled):
+        """Mean squared error of the network on (X, y_scaled). This is what learning minimises."""
+        predictions = self.forward(theta, X)
+        return anp.mean((predictions - y_scaled) ** 2)
+
     def learn(self, data, steps=20, lr=0.05):
         """Run Adam on the training data and return the learned theta.
 
@@ -113,10 +139,39 @@ class GenomeNet:
         parameters are thrown away (Baldwinian) or written back (Lamarckian).
         """
         X, y = data
-        y_scaled = (y - Y_CENTRE) / Y_SCALE
-        theta = self.theta0.copy()
+        y_scaled = (y - Y_CENTRE) / Y_SCALE      # train on the same -1..1 scale the network outputs
+        theta = self.theta0.copy()               # start from the birth weights
+
+        # Nothing to learn: no parameters, or no learning steps
         if theta.size == 0 or steps == 0:
             return theta
+
+        # gradient_of_loss(theta, X, y_scaled) returns one slope per parameter:
+        # how much the loss changes if that parameter is nudged
+        gradient_of_loss = grad(self.loss)
+
+        # Adam's running averages, one value per parameter
+        avg_gradient = np.zeros_like(theta)           # average direction (momentum)
+        avg_squared_gradient = np.zeros_like(theta)   # average size, sets each parameter's step size
+
+        for step in range(1, steps + 1):
+            gradient = gradient_of_loss(theta, X, y_scaled)
+
+            # Update the running averages with this step's gradient
+            avg_gradient = BETA1 * avg_gradient + (1 - BETA1) * gradient
+            avg_squared_gradient = BETA2 * avg_squared_gradient + (1 - BETA2) * gradient ** 2
+
+            # Both averages start at 0, so they are too small in early steps; this corrects that
+            avg_gradient_corrected = avg_gradient / (1 - BETA1 ** step)
+            avg_squared_corrected = avg_squared_gradient / (1 - BETA2 ** step)
+
+            # Step downhill: against the average direction, scaled per parameter
+            theta = theta - lr * avg_gradient_corrected / (np.sqrt(avg_squared_corrected) + EPS)
+
+            # Keep parameters inside NEAT's allowed ranges, as mutation would
+            theta = np.clip(theta, self.lo, self.hi)
+
+        return theta
 
         loss_grad = grad(lambda t: anp.mean((self.forward(t, X) - y_scaled) ** 2))
         m, v = np.zeros_like(theta), np.zeros_like(theta)
